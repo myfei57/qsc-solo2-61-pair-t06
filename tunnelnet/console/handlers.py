@@ -107,6 +107,28 @@ def metrics_reset(server: "Server", request: Request) -> Response:
     return json_response({"reset": True})
 
 
+def idempotency_list(server: "Server", request: Request) -> Response:
+    request_id = request.query_field("request_id")
+    if request_id:
+        return json_response(server.idempotency.describe(request_id))
+    return json_response({"items": server.idempotency.list()})
+
+
+def idempotency_recover(server: "Server", request: Request) -> Response:
+    request_id = request.str_field("request_id")
+    if not request_id:
+        raise RequestError(400, "request_id is required")
+    status_code = request.int_field("status", 503)
+    note = request.str_field("note", "manual recovery")
+    message = request.str_field("message", "request failed during manual recovery")
+    outcome = request.str_field("outcome", "failed")
+    return server.idempotency.recover(request_id, note, status_code, message, outcome)
+
+
+def idempotency_expire(server: "Server", request: Request) -> Response:
+    return json_response(server.idempotency.sweep_expired())
+
+
 def namespaces_list(server: "Server", request: Request) -> Response:
     registry = server.runtime.namespaces
     return json_response({"items": [item.as_dict() for item in registry.list()], "names": registry.names()})

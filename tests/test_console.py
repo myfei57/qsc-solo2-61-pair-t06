@@ -8,6 +8,7 @@ import io
 import json
 import tempfile
 import unittest
+import uuid
 
 from tunnelnet import cli
 from tunnelnet.console import create_application
@@ -40,6 +41,10 @@ class ConsoleCase(unittest.TestCase):
         self._tmp.cleanup()
 
     def call(self, method: str, path: str, payload: dict | None = None, query: dict | None = None):
+        if method.upper() == "POST":
+            payload = dict(payload or {})
+            if "idempotency_key" not in payload and not (query and query.get("idempotency_key")):
+                payload["idempotency_key"] = f"test-{uuid.uuid4().hex}"
         response = self.server.dispatch(method, path, payload, query)
         body = response.body.decode("utf-8")
         parsed = json.loads(body) if response.content_type.startswith("application/json") else body
@@ -556,7 +561,7 @@ class ConsoleCase(unittest.TestCase):
         self.assertTrue(body["alarm_raised"])
         self.assertEqual(body["usage"], 1300.0)
         self.assertEqual(body["drain_runs"], 1)
-        self.assertEqual(body["audit_count"], 4)
+        self.assertEqual(body["audit_count"], 6)
         self.assertEqual(body["last_stage"], "audit")
 
         status, report = self.call("POST", "/api/simulate", {"ticks": 3})
@@ -592,7 +597,9 @@ class WsgiCase(unittest.TestCase):
                 captured["status"] = status
                 captured["headers"] = headers
 
-            payload = json.dumps({"cabin_id": "cabin-1", "requester": "ops"}).encode("utf-8")
+            payload = json.dumps(
+            {"cabin_id": "cabin-1", "requester": "ops", "idempotency_key": "wsgi-approve-1"}
+        ).encode("utf-8")
 
             class Stream:
                 def read(self, size: int) -> bytes:

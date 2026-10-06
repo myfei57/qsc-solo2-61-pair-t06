@@ -110,6 +110,17 @@ class Request:
     path: str
     query: dict[str, list[str]]
     payload: dict[str, object]
+    headers: dict[str, str] = field(default_factory=dict)
+
+    def header(self, name: str, default: str = "") -> str:
+        return self.headers.get(name.lower(), default)
+
+    def idempotency_key(self) -> str:
+        return (
+            self.str_field("idempotency_key")
+            or self.header("Idempotency-Key")
+            or self.header("X-Request-Id")
+        )
 
     def float_field(self, name: str, default: float = 0.0) -> float:
         return _to_float(name, self.payload.get(name, default))
@@ -175,6 +186,17 @@ def build_request(environ: dict[str, object]) -> Request:
     stream = environ.get("wsgi.input")
     raw = stream.read(length) if length and hasattr(stream, "read") else b""
     payload: dict[str, object] = {}
+    headers = {
+        key[5:].lower().replace("_", "-"): str(value)
+        for key, value in environ.items()
+        if key.startswith("HTTP_")
+    }
+    content_type = environ.get("CONTENT_TYPE")
+    if content_type:
+        headers["content-type"] = str(content_type)
+    content_length = environ.get("CONTENT_LENGTH")
+    if content_length:
+        headers["content-length"] = str(content_length)
     if raw:
         try:
             decoded = json.loads(raw.decode("utf-8"))
@@ -183,4 +205,10 @@ def build_request(environ: dict[str, object]) -> Request:
         if not isinstance(decoded, dict):
             raise RequestError(400, "JSON body must be an object")
         payload = decoded
-    return Request(method=method, path=path, query=query, payload=payload)
+    return Request(
+        method=method,
+        path=path,
+        query=query,
+        payload=payload,
+        headers=headers,
+    )

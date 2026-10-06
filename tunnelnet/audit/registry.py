@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 
+from .context import current_audit_batch
 from .model import Record
 from .report import AuditState
 from .summary import count_by_event, summary
@@ -14,12 +15,31 @@ class AuditRegistry:
 
     def __init__(self) -> None:
         self._records: list[Record] = []
+        self._seen: set[str] = set()
         self._lock = threading.RLock()
 
     def append(self, record: Record) -> Record:
         with self._lock:
-            self._records.append(record)
+            if record.id not in self._seen:
+                self._records.append(record)
+                self._seen.add(record.id)
+                batch = current_audit_batch()
+                if batch is not None:
+                    batch.append(record)
         return record
+
+    def replay(self, records: list[Record]) -> int:
+        """Load durable records while preserving their original order and ids."""
+
+        added = 0
+        for record in records:
+            with self._lock:
+                if record.id in self._seen:
+                    continue
+                self._records.append(record)
+                self._seen.add(record.id)
+                added += 1
+        return added
 
     def records(self) -> list[Record]:
         with self._lock:
@@ -37,6 +57,7 @@ class AuditRegistry:
     def clear(self) -> int:
         with self._lock:
             self._records = []
+            self._seen = set()
         return 0
 
     def latest_id(self) -> str:

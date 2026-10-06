@@ -8,6 +8,7 @@ from tunnelnet.store import Store
 
 from . import handlers
 from .http import Request, RequestError, Response, Router, build_request, error_response
+from .idempotency import IdempotencyManager, IdempotencyStore
 from .metrics import Metrics
 from .pages import load_page, page_file, root_redirect
 from .routes import register_routes
@@ -18,9 +19,19 @@ from .seed import seed_defaults
 class Server:
     """Owns the runtime state and dispatches console requests."""
 
-    def __init__(self, store: Store, web_dir: str = "web") -> None:
+    def __init__(
+        self,
+        store: Store,
+        web_dir: str = "web",
+        idempotency_ttl_seconds: int = 24 * 60 * 60,
+    ) -> None:
         self.runtime = Runtime(store)
         seed_defaults(self.runtime)
+        self.idempotency = IdempotencyManager(
+            IdempotencyStore(store),
+            self.runtime,
+            ttl_seconds=idempotency_ttl_seconds,
+        )
         self.web_dir = web_dir
         self.router = Router()
         self.metrics = Metrics()
@@ -49,6 +60,8 @@ class Server:
                 )
             return error_response(404, f"no route for {request.path}")
         try:
+            if request.method == "POST" and request.path not in self._idempotency_exempt_paths():
+                return self.idempotency.execute(self, request, handler)
             return handler(self, request)
         except RequestError as exc:
             return error_response(exc.status, exc.message)
@@ -57,12 +70,22 @@ class Server:
         except Exception as exc:  # noqa: BLE001 - last resort for a live console
             return error_response(500, str(exc))
 
+    @staticmethod
+    def _idempotency_exempt_paths() -> frozenset[str]:
+        return frozenset(
+            {
+                "/api/idempotency/recover",
+                "/api/idempotency/expire",
+            }
+        )
+
     def dispatch(
         self,
         method: str,
         path: str,
         payload: dict[str, object] | None = None,
         query: dict[str, list[str]] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> Response:
         """Call a route directly, used by the test suite and CLI probes."""
 
@@ -71,6 +94,7 @@ class Server:
             path=path,
             query=dict(query or {}),
             payload=dict(payload or {}),
+            headers={key.lower(): value for key, value in (headers or {}).items()},
         )
         return self.respond(request)
 
