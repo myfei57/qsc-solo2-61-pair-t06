@@ -659,6 +659,18 @@ def quota_add_usage(server: "Server", request: Request) -> Response:
     return json_response({"usage": usage})
 
 
+def idempotency_status(server: "Server", request: Request) -> Response:
+    method = request.query_field("method", "POST").upper()
+    path = request.query_field("path")
+    key = request.query_field("key")
+    if not path or not key:
+        raise RequestError(400, "path and key are required")
+    record = server.runtime.idempotency.status(f"{method} {path}", key)
+    if record is None:
+        raise RequestError(404, "no such idempotency key")
+    return json_response(record)
+
+
 def audit_list(server: "Server", request: Request) -> Response:
     registry = server.runtime.audit
     return json_response({"items": [record.as_dict() for record in registry.list()], "count": registry.count()})

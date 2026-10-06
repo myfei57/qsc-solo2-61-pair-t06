@@ -43,6 +43,29 @@ class Store:
                 handle.write(record.encode(value))
             os.replace(temporary, path)
 
+    def try_save(self, kind: str, record_id: str, value: object) -> bool:
+        """Create one record only when absent, returning whether this call won.
+
+        The document is written to a unique temporary file and then hard
+        linked into place, so concurrent callers cannot both succeed and an
+        interrupted write never leaves a partial record behind.  This is the
+        atomic claim primitive the idempotency guard builds on.
+        """
+
+        with self._lock:
+            path = record.record_path(self._root, kind, record_id)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            temporary = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+            with open(temporary, "w", encoding="utf-8") as handle:
+                handle.write(record.encode(value))
+            try:
+                os.link(temporary, path)
+            except FileExistsError:
+                return False
+            finally:
+                os.unlink(temporary)
+            return True
+
     def load(self, kind: str, record_id: str) -> dict[str, object] | None:
         """Read one record, or ``None`` when it is absent or unreadable."""
 

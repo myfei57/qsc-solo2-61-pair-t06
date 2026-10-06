@@ -113,6 +113,7 @@ def route_table() -> list[Route]:
         Route("POST", "/api/quota/usage", "add cabin usage", "quota_add_usage"),
         Route("GET", "/api/audit", "audit records", "audit_list"),
         Route("GET", "/api/audit/query", "query audit records", "audit_query"),
+        Route("GET", "/api/idempotency", "idempotency record for one key", "idempotency_status"),
         Route("GET", "/api/audit/summary", "audit counters", "audit_summary"),
         Route("GET", "/api/audit/marks", "de-duplication marks", "audit_marks"),
         Route("POST", "/api/audit/append", "append an audit record", "audit_append"),

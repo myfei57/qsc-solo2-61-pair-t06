@@ -154,7 +154,7 @@ class ConsoleCase(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("must be a number", body["error"])
 
-        status, body = self.call("POST", "/api/cabins/door", {"id": "ghost", "release": True})
+        status, body = self.call("POST", "/api/cabins/door", {"id": "ghost", "release": True, "idempotency_key": "idem-door-ghost"})
         self.assertEqual(status, 400)
         self.assertIn("not found", body["error"])
 
@@ -221,13 +221,13 @@ class ConsoleCase(unittest.TestCase):
         status, body = self.call("POST", "/api/cabins/zone", {"id": "cabin-4", "zone": "zone-8"})
         self.assertEqual(body["cabin"]["zone"], "zone-8")
 
-        status, body = self.call("POST", "/api/cabins/door", {"id": "cabin-1", "release": True})
+        status, body = self.call("POST", "/api/cabins/door", {"id": "cabin-1", "release": True, "idempotency_key": "idem-door-1-open"})
         self.assertTrue(body["open"])
-        status, body = self.call("POST", "/api/cabins/door", {"id": "cabin-1", "release": False})
+        status, body = self.call("POST", "/api/cabins/door", {"id": "cabin-1", "release": False, "idempotency_key": "idem-door-1-seal"})
         self.assertFalse(body["open"])
-        status, body = self.call("POST", "/api/cabins/valve", {"id": "cabin-1", "open": True})
+        status, body = self.call("POST", "/api/cabins/valve", {"id": "cabin-1", "open": True, "idempotency_key": "idem-valve-1-open"})
         self.assertTrue(body["open"])
-        status, body = self.call("POST", "/api/cabins/valve", {"id": "cabin-1", "open": False})
+        status, body = self.call("POST", "/api/cabins/valve", {"id": "cabin-1", "open": False, "idempotency_key": "idem-valve-1-close"})
         self.assertFalse(body["open"])
 
         status, body = self.call("POST", "/api/cabins/label", {"id": "cabin-1", "label": "cold"})
@@ -244,7 +244,7 @@ class ConsoleCase(unittest.TestCase):
         self.assertEqual(pending["count"], 1)
         self.assertEqual(pending["pending"][0]["id"], request["id"])
 
-        status, approval = self.call("POST", "/api/access/grant", {"request_id": request["id"]})
+        status, approval = self.call("POST", "/api/access/grant", {"request_id": request["id"], "idempotency_key": "idem-grant-1"})
         self.assertEqual(status, 200)
         self.assertEqual(approval["cabin_id"], "cabin-1")
 
@@ -252,19 +252,19 @@ class ConsoleCase(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(approvals["items"][0]["durable"])
 
-        status, direct = self.call("POST", "/api/access/approve", {"cabin_id": "cabin-2", "requester": "ops"})
+        status, direct = self.call("POST", "/api/access/approve", {"cabin_id": "cabin-2", "requester": "ops", "idempotency_key": "idem-approve-1"})
         self.assertEqual(direct["cabin_id"], "cabin-2")
 
         status, summary = self.call("GET", "/api/access/summary")
         self.assertEqual(summary["requests"], 1)
         self.assertEqual(summary["granted"], 1)
 
-        status, body = self.call("POST", "/api/access/revoke", {"approval_id": direct["id"]})
+        status, body = self.call("POST", "/api/access/revoke", {"approval_id": direct["id"], "idempotency_key": "idem-revoke-1"})
         self.assertTrue(body["revoked"])
-        status, body = self.call("POST", "/api/access/revoke", {"approval_id": direct["id"]})
+        status, body = self.call("POST", "/api/access/revoke", {"approval_id": direct["id"], "idempotency_key": "idem-revoke-2"})
         self.assertEqual(status, 404)
 
-        status, body = self.call("POST", "/api/access/grant", {"request_id": "ghost"})
+        status, body = self.call("POST", "/api/access/grant", {"request_id": "ghost", "idempotency_key": "idem-grant-ghost"})
         self.assertEqual(status, 400)
 
     def test_environment_routes(self) -> None:
@@ -327,14 +327,14 @@ class ConsoleCase(unittest.TestCase):
         status, threshold = self.call("POST", "/api/drain/threshold", {"threshold": 0.3})
         self.assertEqual(threshold["threshold"], 0.3)
 
-        status, body = self.call("POST", "/api/drain/start", {"cabin_id": "cabin-1"})
+        status, body = self.call("POST", "/api/drain/start", {"cabin_id": "cabin-1", "idempotency_key": "idem-drain-start-1"})
         self.assertEqual(body["runs"], 1)
         self.assertEqual(body["state"], "pump_running")
 
-        status, body = self.call("POST", "/api/drain/execute", {"command_key": "cmd-1"})
+        status, body = self.call("POST", "/api/drain/execute", {"command_key": "cmd-1", "idempotency_key": "idem-drain-exec-1"})
         self.assertTrue(body["executed"])
         self.assertEqual(body["runs"], 2)
-        status, body = self.call("POST", "/api/drain/execute", {"command_key": "cmd-1"})
+        status, body = self.call("POST", "/api/drain/execute", {"command_key": "cmd-1", "idempotency_key": "idem-drain-exec-2"})
         self.assertFalse(body["executed"])
 
         status, body = self.call("POST", "/api/drain/cycle", {"cabin_id": "cabin-1", "at": "t"})
@@ -488,7 +488,7 @@ class ConsoleCase(unittest.TestCase):
         self.assertEqual(summary["peak_cabin"], "cabin-1")
 
     def test_audit_and_store_routes(self) -> None:
-        self.call("POST", "/api/access/approve", {"cabin_id": "cabin-1", "requester": "ops"})
+        self.call("POST", "/api/access/approve", {"cabin_id": "cabin-1", "requester": "ops", "idempotency_key": "idem-approve-audit"})
         status, audit = self.call("GET", "/api/audit")
         self.assertGreaterEqual(audit["count"], 2)
 
@@ -573,7 +573,7 @@ class ConsoleCase(unittest.TestCase):
         self.assertEqual(len(report["ticks"]), 5)
 
     def test_ops_reset_store(self) -> None:
-        self.call("POST", "/api/access/approve", {"cabin_id": "cabin-1", "requester": "ops"})
+        self.call("POST", "/api/access/approve", {"cabin_id": "cabin-1", "requester": "ops", "idempotency_key": "idem-approve-ops"})
         _, before = self.call("GET", "/api/ops")
         self.assertGreaterEqual(before["store_records"], 1)
         status, body = self.call("POST", "/api/ops/reset-store")
@@ -603,6 +603,7 @@ class WsgiCase(unittest.TestCase):
                 "PATH_INFO": "/api/access/approve",
                 "QUERY_STRING": "",
                 "CONTENT_LENGTH": str(len(payload)),
+                "HTTP_IDEMPOTENCY_KEY": "idem-wsgi-approve",
                 "wsgi.input": Stream(),
             }
             body = b"".join(server(environ, start_response))

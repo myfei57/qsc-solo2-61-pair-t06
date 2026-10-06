@@ -110,6 +110,7 @@ class Request:
     path: str
     query: dict[str, list[str]]
     payload: dict[str, object]
+    headers: dict[str, str] = field(default_factory=dict)
 
     def float_field(self, name: str, default: float = 0.0) -> float:
         return _to_float(name, self.payload.get(name, default))
@@ -183,4 +184,8 @@ def build_request(environ: dict[str, object]) -> Request:
         if not isinstance(decoded, dict):
             raise RequestError(400, "JSON body must be an object")
         payload = decoded
-    return Request(method=method, path=path, query=query, payload=payload)
+    headers: dict[str, str] = {}
+    idempotency_key = environ.get("HTTP_IDEMPOTENCY_KEY")
+    if isinstance(idempotency_key, str) and idempotency_key.strip():
+        headers["idempotency-key"] = idempotency_key.strip()
+    return Request(method=method, path=path, query=query, payload=payload, headers=headers)

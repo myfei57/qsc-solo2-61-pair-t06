@@ -15,6 +15,9 @@ from tunnelnet.quota import QuotaService
 from tunnelnet.store import Store
 from tunnelnet.vent import VentService
 
+from .audit_log import record_event
+from .idempotency import IdempotencyGuard
+
 DEFAULT_ZONES = ("zone-1", "zone-2", "zone-3")
 DEFAULT_THRESHOLD = 75.0
 
@@ -41,3 +44,6 @@ class Runtime:
         self.power_book = PowerBook()
         self.quota = QuotaService(self.cabins, self.power_book)
         self.audit = AuditRegistry()
+        self.idempotency = IdempotencyGuard(
+            store, observer=lambda event, ref: record_event(self, event, ref)
+        )

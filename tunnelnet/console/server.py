@@ -8,11 +8,28 @@ from tunnelnet.store import Store
 
 from . import handlers
 from .http import Request, RequestError, Response, Router, build_request, error_response
+from .idempotency import key_of, scope_of
 from .metrics import Metrics
 from .pages import load_page, page_file, root_redirect
 from .routes import register_routes
 from .runtime import Runtime
 from .seed import seed_defaults
+
+WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+# 强制携带幂等标识的写路由：放行与排水类操作，重复执行的代价最高。
+# 名单之外的写路由：带标识即受保护，不带则保持 legacy 行为。
+ENFORCED_ROUTES = frozenset(
+    {
+        "POST /api/access/approve",
+        "POST /api/access/grant",
+        "POST /api/access/revoke",
+        "POST /api/cabins/door",
+        "POST /api/cabins/valve",
+        "POST /api/drain/start",
+        "POST /api/drain/execute",
+    }
+)
 
 
 class Server:
@@ -21,6 +38,8 @@ class Server:
     def __init__(self, store: Store, web_dir: str = "web") -> None:
         self.runtime = Runtime(store)
         seed_defaults(self.runtime)
+        self.runtime.idempotency.recover_interrupted()
+        self.runtime.idempotency.sweep_expired()
         self.web_dir = web_dir
         self.router = Router()
         self.metrics = Metrics()
@@ -48,6 +67,22 @@ class Server:
                     405, f"method {request.method} not allowed for {request.path}"
                 )
             return error_response(404, f"no route for {request.path}")
+        if request.method in WRITE_METHODS:
+            return self._guarded_write(request, handler)
+        return self._invoke(handler, request)
+
+    def _guarded_write(self, request: Request, handler: Callable[..., Response]) -> Response:
+        if not key_of(request):
+            if scope_of(request) in ENFORCED_ROUTES:
+                return error_response(
+                    400,
+                    "idempotency key required for this route "
+                    "(Idempotency-Key header or idempotency_key field)",
+                )
+            return self._invoke(handler, request)
+        return self.runtime.idempotency.guarded(request, lambda: self._invoke(handler, request))
+
+    def _invoke(self, handler: Callable[..., Response], request: Request) -> Response:
         try:
             return handler(self, request)
         except RequestError as exc:
